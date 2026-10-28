@@ -2,21 +2,21 @@
 set -eu
 cd "$(dirname "$0")"
 base="${XDG_DATA_HOME:-$HOME/.local/share}"
-app="$base/stamina/app"
+app="$base/capee/app"
 mkdir -p "$app" "$base/applications" "$base/icons/hicolor/scalable/apps"
-cp stamina "$app/stamina"
-chmod +x "$app/stamina"
-cp stamina.svg "$base/icons/hicolor/scalable/apps/stamina.svg"
+cp capee "$app/capee"
+chmod +x "$app/capee"
+cp capee.svg "$base/icons/hicolor/scalable/apps/capee.svg"
 case "$app" in *'"'*|*'`'*|*'$'*|*'\'*) echo 'Unsupported characters in installation path' >&2; exit 1;; esac
-cat > "$base/applications/stamina.desktop" <<DESKTOP
+cat > "$base/applications/capee.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Stamina
+Name=Capee
 Comment=Touch typing practice — Russian, English, Python, C++
-Exec="$app/stamina"
-Icon=stamina
+Exec="$app/capee"
+Icon=capee
 Terminal=false
 Categories=Education;
 Keywords=typing;keyboard;training;
 DESKTOP
-printf 'Stamina installed. Open Stamina from your applications menu.\n'
+printf 'Capee installed. Open Capee from your applications menu.\n'

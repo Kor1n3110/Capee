@@ -153,7 +153,7 @@ impl App {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
             .unwrap_or_else(std::env::temp_dir);
-        let path = root.join("stamina/history.json");
+        let path = root.join("capee/history.json");
         let mut notice = String::new();
         let data=match std::fs::read(&path){Ok(b)=>serde_json::from_slice(&b).unwrap_or_else(|_|{notice="Файл истории повреждён. Сохранение отключено: сохраните резервную копию и исправьте файл.".into();Data::default()}),Err(e) if e.kind()==std::io::ErrorKind::NotFound=>Data::default(),Err(e)=>{notice=format!("Не удалось прочитать историю: {e}");Data::default()}};
         Self {
@@ -246,7 +246,7 @@ impl eframe::App for App {
             .frame(egui::Frame::new().fill(GREEN).inner_margin(24.))
             .show(ctx, |ui| {
                 ui.add_space(15.);
-                ui.label(RichText::new("stamina").size(32.).color(LIME).strong());
+                ui.label(RichText::new("capee").size(32.).color(LIME).strong());
                 ui.label(
                     RichText::new("ПРАКТИКА ПЕЧАТИ")
                         .size(10.)
@@ -301,7 +301,7 @@ impl eframe::App for App {
 }
 fn main() -> eframe::Result {
     eframe::run_native(
-        "Stamina — практика печати",
+        "Capee — практика печати",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([1180., 860.])
