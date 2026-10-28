@@ -205,15 +205,33 @@ impl App {
             .to_lowercase()
             .next()
             .unwrap_or('\0');
-        let colors = [
-            Color32::from_rgb(242, 214, 215),
-            Color32::from_rgb(246, 231, 187),
-            Color32::from_rgb(211, 231, 202),
-            Color32::from_rgb(205, 224, 236),
-        ];
+        let dark = self.data.dark;
+        let colors = if dark {
+            [
+                Color32::from_rgb(67, 43, 49),
+                Color32::from_rgb(67, 59, 38),
+                Color32::from_rgb(41, 62, 45),
+                Color32::from_rgb(36, 53, 66),
+            ]
+        } else {
+            [
+                Color32::from_rgb(242, 214, 215),
+                Color32::from_rgb(246, 231, 187),
+                Color32::from_rgb(211, 231, 202),
+                Color32::from_rgb(205, 224, 236),
+            ]
+        };
+        let gap = 8.;
+        ui.spacing_mut().item_spacing = egui::vec2(gap, 6.);
+        ui.spacing_mut().button_padding = egui::vec2(8., 6.);
+        let compact = ui.ctx().screen_rect().height() < 950.;
+        let key_width =
+            ((ui.available_width() - 12. * gap) / 13.).clamp(30., if compact { 43. } else { 62. });
+        let key_height = (key_width * 0.78).clamp(34., 48.);
+        let space_width = key_width * 6. + 5. * gap;
         for s in &rows {
             ui.horizontal(|ui| {
-                let width = s.chars().count() as f32 * 43.
+                let width = s.chars().count() as f32 * key_width
                     + (s.chars().count() - 1) as f32 * ui.spacing().item_spacing.x;
                 ui.add_space(((ui.available_width() - width) / 2.).max(0.));
                 for (i, c) in s.chars().enumerate() {
@@ -223,28 +241,63 @@ impl App {
                         colors[i.min(s.chars().count().saturating_sub(1) - i).min(3)]
                     };
                     ui.add_sized(
-                        [43., 36.],
-                        egui::Button::new(RichText::new(c.to_string()).color(GREEN)).fill(col),
+                        [key_width, key_height],
+                        egui::Button::new(RichText::new(c.to_string()).size(17.).color(
+                            if c == next || !dark {
+                                GREEN
+                            } else {
+                                Color32::from_gray(225)
+                            },
+                        ))
+                        .fill(col)
+                        .corner_radius(7.),
                     );
                 }
             });
         }
         ui.horizontal(|ui| {
-            ui.add_space(((ui.available_width() - 320.) / 2.).max(0.));
+            ui.add_space(((ui.available_width() - space_width) / 2.).max(0.));
             ui.add_sized(
-                [320., 32.],
-                egui::Button::new(RichText::new("пробел").color(GREEN)).fill(if next == ' ' {
+                [space_width, key_height * 0.85],
+                egui::Button::new(RichText::new("пробел").color(if next == ' ' || !dark {
+                    GREEN
+                } else {
+                    Color32::LIGHT_GRAY
+                }))
+                .fill(if next == ' ' {
                     LIME
                 } else {
-                    Color32::from_gray(230)
-                }),
+                    if dark {
+                        Color32::from_rgb(42, 48, 44)
+                    } else {
+                        Color32::from_gray(230)
+                    }
+                })
+                .corner_radius(7.),
             );
         });
-        ui.label(RichText::new("Мизинец  ·  Безымянный  ·  Средний  ·  Указательный     /     Большие пальцы — пробел").small().color(MUTED));
+        ui.add_space(8.);
+        ui.horizontal_wrapped(|ui| {
+            for (color, name) in
+                colors
+                    .iter()
+                    .zip(["Мизинец", "Безымянный", "Средний", "Указательный"])
+            {
+                ui.label(RichText::new("●").color(*color).size(18.));
+                ui.label(RichText::new(name).small().color(MUTED));
+                ui.add_space(10.);
+            }
+            ui.label(
+                RichText::new("Большие пальцы — пробел")
+                    .small()
+                    .color(MUTED),
+            );
+        });
     }
 }
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        let compact = ctx.screen_rect().height() < 950.;
         let dark = self.data.dark;
         let background = if dark {
             Color32::from_rgb(14, 16, 15)
@@ -351,21 +404,34 @@ impl eframe::App for App {
                     RichText::new("Быстрее сегодня.\nУвереннее завтра.").color(Color32::LIGHT_GRAY),
                 );
             });
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(background).inner_margin(30.)).show(ctx,|ui|{egui::ScrollArea::vertical().show(ui,|ui|{
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(background).inner_margin(24.)).show(ctx,|ui|{
+ egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui,|ui|{
+ let width=ui.available_width().min(1140.);
+ let inset=((ui.available_width()-width)/2.).max(0.);
+ ui.horizontal(|ui|{ui.add_space(inset);ui.allocate_ui_with_layout(egui::vec2(width,0.),egui::Layout::top_down(egui::Align::Min),|ui|{
+ ui.set_width(width);
+ if compact {ui.spacing_mut().item_spacing.y=8.;}
+ ui.add_space(if width>1000. {16.}else{0.});
  ui.horizontal(|ui|{ui.heading(RichText::new(match self.page{0=>"Тише мысли. Быстрее пальцы.",1=>"Маленькие шаги. Большой прогресс.",2=>"Ваш ритм в цифрах.",_=>"Место для вашей практики."}).size(27.));});ui.label(RichText::new("Ежедневная практика слепой печати").color(MUTED));ui.add_space(15.);
  if !self.notice.is_empty(){ui.colored_label(Color32::DARK_RED,&self.notice);}
  if self.page==0 {
  let old=(self.profile,self.layout);ui.horizontal(|ui|{egui::ComboBox::from_id_salt("profile").selected_text(self.data.profiles.get(self.profile).map(String::as_str).unwrap_or("Мой профиль")).show_ui(ui,|ui|{for(i,p)in self.data.profiles.iter().enumerate(){ui.selectable_value(&mut self.profile,i,p);}});egui::ComboBox::from_id_salt("layout").selected_text(COURSES[self.layout]).show_ui(ui,|ui|{for (i,name) in COURSES.iter().enumerate(){ui.selectable_value(&mut self.layout,i,*name);}});if ui.button("Начать заново").clicked(){self.reset()}});if old!=(self.profile,self.layout){self.reset()}
- ui.add_space(8.);ui.columns(3,|cols|{for (col,(label,value))in cols.iter_mut().zip([("Скорость",format!("{:.0} зн/мин",self.run.speed())),("Точность",format!("{:.0}%",self.run.accuracy())),("Время",format!("{:02}:{:02}",self.run.seconds() as u64/60,self.run.seconds() as u64%60))]){egui::Frame::new().fill(card).inner_margin(18.).corner_radius(12.).show(col,|ui|{ui.set_min_width(150.);ui.label(RichText::new(label).color(MUTED));ui.label(RichText::new(value).size(30.).strong());});}});
- ui.add_space(15.);egui::Frame::new().fill(card).inner_margin(24.).corner_radius(12.).show(ui,|ui|{ui.label(RichText::new(format!("УРОК {} / 8   ·   {}",self.lesson+1,lessons::title(self.layout,self.lesson))).small().color(MUTED));ui.add_space(14.);
- let mut job=egui::text::LayoutJob::default();for(i,c)in self.run.text.iter().enumerate(){job.append(&if *c=='\n'{"↵\n".into()}else{c.to_string()},0.,egui::TextFormat{font_id:egui::FontId::monospace(23.),color:if i==self.run.position{GREEN}else if i<self.run.position{if dark {LIME}else{Color32::from_rgb(63,133,83)}}else{MUTED},background:if i==self.run.position {if self.run.wrong{Color32::from_rgb(255,195,195)}else{LIME}}else{Color32::TRANSPARENT},..Default::default()});}ui.label(job);ui.add_space(12.);ui.label(if self.run.done{"Готово! Результат сохранён."}else if self.run.paused{"Пауза. Нажмите «Продолжить»."}else{"Печатайте текст · ошибочный символ не продвигает курсор"});});
- ui.add_space(12.);self.keyboard(ui);ui.add_space(12.);ui.add(egui::ProgressBar::new(self.run.position as f32/self.run.text.len().max(1) as f32).fill(GREEN).show_percentage());
- ui.horizontal(|ui|{if ui.button(if self.run.paused{"Продолжить"}else{"Пауза"}).clicked(){self.run.pause()} if self.run.done && ui.button("Следующий урок →").clicked(){self.lesson=(self.lesson+1).min(7);self.reset()}ui.label(format!("Ошибок: {}",self.run.errors));});
+ ui.add_space(8.);ui.columns(3,|cols|{for (col,(label,value))in cols.iter_mut().zip([("Скорость",format!("{:.0} зн/мин",self.run.speed())),("Точность",format!("{:.0}%",self.run.accuracy())),("Время",format!("{:02}:{:02}",self.run.seconds() as u64/60,self.run.seconds() as u64%60))]){let col_width=col.available_width();egui::Frame::new().fill(card).inner_margin(if compact{12.}else{18.}).corner_radius(12.).show(col,|ui|{ui.set_min_width((col_width-if compact{24.}else{36.}).max(0.));ui.label(RichText::new(label).color(MUTED));ui.label(RichText::new(value).size(30.).strong());});}});
+ ui.add_space(if compact{4.}else{12.});let exercise_width=ui.available_width();egui::Frame::new().fill(card).inner_margin(if compact{18.}else{28.}).corner_radius(16.).show(ui,|ui|{ui.set_min_width(exercise_width-if compact{36.}else{56.});ui.label(RichText::new(format!("УРОК {} / 8   ·   {}",self.lesson+1,lessons::title(self.layout,self.lesson))).small().color(MUTED));ui.add_space(14.);
+ let mut job=egui::text::LayoutJob::default();for(i,c)in self.run.text.iter().enumerate(){job.append(&if *c=='\n'{"↵\n".into()}else{c.to_string()},0.,egui::TextFormat{font_id:egui::FontId::monospace(23.),color:if i==self.run.position{GREEN}else if i<self.run.position{if dark {LIME}else{Color32::from_rgb(63,133,83)}}else{MUTED},background:if i==self.run.position {if self.run.wrong{Color32::from_rgb(255,195,195)}else{LIME}}else{Color32::TRANSPARENT},..Default::default()});}ui.allocate_ui_with_layout(egui::vec2(ui.available_width(),if compact{60.}else{100.}),egui::Layout::top_down(egui::Align::Min),|ui|{ui.add(egui::Label::new(job).wrap());});ui.add_space(12.);ui.label(if self.run.done{"Готово! Результат сохранён."}else if self.run.paused{"Пауза. Нажмите «Продолжить»."}else{"Печатайте текст · ошибочный символ не продвигает курсор"});});
+ ui.add_space(12.);
+ let keyboard_width=ui.available_width();
+ egui::Frame::new().fill(card).inner_margin(if compact{16.}else{24.}).corner_radius(16.).show(ui,|ui|{
+ ui.set_min_width(keyboard_width-if compact{32.}else{48.});
+ ui.horizontal(|ui|{ui.label(RichText::new("КЛАВИАТУРА").size(11.).color(MUTED));ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{ui.label(RichText::new("Подсветка показывает следующую клавишу").small().color(MUTED));});});
+ ui.add_space(12.);self.keyboard(ui);
+ });ui.add_space(16.);ui.add(egui::ProgressBar::new(self.run.position as f32/self.run.text.len().max(1) as f32).fill(GREEN).show_percentage());
+ ui.horizontal(|ui|{ui.label(RichText::new(format!("{} / {} символов",self.run.position,self.run.text.len())).color(MUTED));ui.add_space(12.);if ui.button(if self.run.paused{"Продолжить"}else{"Пауза"}).clicked(){self.run.pause()} if self.run.done && ui.button("Следующий урок →").clicked(){self.lesson=(self.lesson+1).min(7);self.reset()}ui.label(format!("Ошибок: {}",self.run.errors));});
  if !ctx.wants_keyboard_input(){let events=ctx.input(|i|i.events.clone());for event in events {let text=match event {egui::Event::Text(t)=>t,egui::Event::Key{key:egui::Key::Enter,pressed:true,..}=>"\n".into(),egui::Event::Key{key:egui::Key::Tab,pressed:true,..}=>"    ".into(),_=>String::new()};for c in text.chars(){let was_done=self.run.done;self.run.input(c);if self.run.wrong && self.data.sound{let _=std::process::Command::new("canberra-gtk-play").args(["-i","dialog-error"]).spawn();}if !was_done && self.run.done {self.data.records.push(Record{profile:self.data.profiles[self.profile].clone(),layout:self.layout,lesson:self.lesson,speed:self.run.speed(),accuracy:self.run.accuracy(),errors:self.run.errors,seconds:self.run.seconds()});self.save();}}}}
  } else if self.page==1 {ui.horizontal(|ui|{for(i,name)in COURSES.iter().enumerate(){if ui.selectable_value(&mut self.layout,i,*name).clicked(){self.reset();}}});ui.add_space(10.);for(i,title)in (if self.layout<2 {lessons::TITLES}else{lessons::CODE_TITLES}).iter().enumerate(){egui::Frame::new().fill(card).inner_margin(18.).corner_radius(10.).show(ui,|ui|{ui.horizontal(|ui|{ui.label(RichText::new(format!("0{}   {}",i+1,title)).size(22.));if ui.button("Практиковаться →").clicked(){self.lesson=i;self.reset();self.page=0}});ui.label(lessons::hint(self.layout));});}ui.add_space(15.);ui.heading("Ваш текст");ui.add(egui::TextEdit::multiline(&mut self.custom).desired_rows(4).hint_text("Вставьте текст для тренировки"));if ui.add_enabled(!self.custom.trim().is_empty(),egui::Button::new("Тренироваться со своим текстом")).clicked(){let text=self.custom.replace("\r\n","\n").replace('\t',"    ");self.run=Run::new(&text);self.page=0;}
  }else if self.page==2 {let name=self.data.profiles.get(self.profile).cloned().unwrap_or_default();ui.label(format!("Профиль: {name}"));let records:Vec<_>=self.data.records.iter().filter(|r|r.profile==name).collect();if records.is_empty(){ui.add_space(40.);ui.heading("Первая тренировка — начало истории.");ui.label("Завершите урок, чтобы увидеть здесь свой прогресс.");}else{ui.label(format!("Завершено: {}    ·    Лучшая скорость: {:.0} зн/мин",records.len(),records.iter().map(|r|r.speed).fold(0.,f64::max)));let (rect,_)=ui.allocate_exact_size(egui::vec2(ui.available_width(),120.),egui::Sense::hover());let max=records.iter().map(|r|r.speed).fold(1.,f64::max);for(i,r)in records.iter().rev().take(30).rev().enumerate(){let w=rect.width()/30.;let h=(r.speed/max)as f32*100.;ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(rect.left()+i as f32*w,rect.bottom()-h),egui::vec2(w-4.,h)),3.,if dark{LIME}else{GREEN});}egui::Grid::new("history").striped(true).spacing([24.,12.]).show(ui,|ui|{for s in ["Урок","Раскладка","Зн/мин","Точность","Ошибки"]{ui.strong(s);}ui.end_row();for r in records.iter().rev().take(100){ui.label(lessons::title(r.layout.min(3),r.lesson.min(7)));ui.label(COURSES[r.layout.min(3)]);ui.label(format!("{:.0}",r.speed));ui.label(format!("{:.1}%",r.accuracy));ui.label(r.errors.to_string());ui.end_row();}});}
  }else {if ui.checkbox(&mut self.data.dark,"Тёмная тема").changed(){self.save()}ui.heading("Профили");ui.label("История каждого пользователя хранится отдельно на этом компьютере.");ui.horizontal(|ui|{ui.text_edit_singleline(&mut self.new_profile);if ui.button("Добавить профиль").clicked(){let name=self.new_profile.trim().to_string();if !name.is_empty()&&!self.data.profiles.contains(&name){self.data.profiles.push(name);self.profile=self.data.profiles.len()-1;self.new_profile.clear();self.reset();self.save();}}});for p in &self.data.profiles{ui.label(format!("• {p}"));}ui.add_space(20.);if ui.checkbox(&mut self.data.sound,"Звук ошибки (Linux: canberra-gtk-play)").changed(){self.save()}ui.add_space(20.);ui.heading("Как заниматься");ui.label("Сидите удобно, расслабьте кисти.\nНачните с домашнего ряда и занимайтесь по 10–15 минут.\nЦвет клавиши подсказывает палец, подсветка — следующую букву.\nРаскладку операционной системы переключайте самостоятельно.");ui.label(format!("Данные: {}",self.path.display()));}
- });});
+ });});});});
     }
 }
 fn main() -> eframe::Result {
