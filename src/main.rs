@@ -9,6 +9,7 @@ const LIME: Color32 = Color32::from_rgb(213, 246, 133);
 const PAPER: Color32 = Color32::from_rgb(247, 246, 240);
 const MUTED: Color32 = Color32::from_rgb(128, 139, 130);
 mod lessons;
+mod screens;
 use lessons::COURSES;
 #[derive(Default, Serialize, Deserialize, Clone)]
 struct Record {
@@ -19,6 +20,8 @@ struct Record {
     accuracy: f64,
     errors: usize,
     seconds: f64,
+    #[serde(default)]
+    endless: bool,
 }
 #[derive(Serialize, Deserialize)]
 struct Data {
@@ -48,6 +51,11 @@ struct Run {
     paused: bool,
     done: bool,
     wrong: bool,
+    endless: bool,
+    course: usize,
+    random: u64,
+    discarded: usize,
+    recorded: bool,
 }
 impl Run {
     fn new(text: &str) -> Self {
@@ -61,7 +69,47 @@ impl Run {
             paused: false,
             done: false,
             wrong: false,
+            endless: false,
+            course: 0,
+            random: 1,
+            discarded: 0,
+            recorded: false,
         }
+    }
+    fn infinite(course: usize, seed: u64) -> Self {
+        let mut run = Self::new("");
+        run.endless = true;
+        run.course = course;
+        run.random = seed;
+        run.extend_stream();
+        run
+    }
+    fn typed(&self) -> usize {
+        self.discarded + self.position
+    }
+    fn extend_stream(&mut self) {
+        while self.text.len().saturating_sub(self.position) < 180 {
+            if !self.text.is_empty() {
+                self.text
+                    .extend(if self.course < 2 { " " } else { "\n\n" }.chars());
+            }
+            self.text
+                .extend(lessons::endless_block(self.course, &mut self.random).chars());
+        }
+        // Retain enough typed text for the centered cursor without accumulating a whole session.
+        if self.position > 512 {
+            let drop = self.position - 100;
+            self.text.drain(..drop);
+            self.position -= drop;
+            self.discarded += drop;
+        }
+    }
+    fn finish(&mut self) {
+        if let Some(t) = self.start.take() {
+            self.elapsed += t.elapsed();
+        }
+        self.done = true;
+        self.paused = false;
     }
     fn seconds(&self) -> f64 {
         (self.elapsed + self.start.map(|t| t.elapsed()).unwrap_or_default()).as_secs_f64()
@@ -70,7 +118,7 @@ impl Run {
         if self.seconds() < 0.1 {
             0.0
         } else {
-            self.position as f64 * 60.0 / self.seconds()
+            self.typed() as f64 * 60.0 / self.seconds()
         }
     }
     fn accuracy(&self) -> f64 {
@@ -106,7 +154,10 @@ impl Run {
         } else {
             self.position += 1
         }
-        if self.position == self.text.len() {
+        if self.endless {
+            self.extend_stream();
+        }
+        if !self.endless && self.position == self.text.len() {
             if let Some(t) = self.start.take() {
                 self.elapsed += t.elapsed()
             }
@@ -125,6 +176,7 @@ struct App {
     custom: String,
     new_profile: String,
     notice: String,
+    selected_endless: bool,
 }
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -162,7 +214,7 @@ impl App {
         Self {
             data,
             path,
-            page: 0,
+            page: 4,
             profile: 0,
             layout: 0,
             lesson: 0,
@@ -170,6 +222,7 @@ impl App {
             custom: String::new(),
             new_profile: String::new(),
             notice,
+            selected_endless: false,
         }
     }
     fn save(&mut self) {
@@ -188,11 +241,36 @@ impl App {
         }
     }
     fn reset(&mut self) {
-        self.run = Run::new(&lessons::exercise(self.layout, self.lesson));
+        self.run = if self.selected_endless {
+            let seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64;
+            Run::infinite(self.layout, seed)
+        } else {
+            Run::new(&lessons::exercise(self.layout, self.lesson))
+        };
+    }
+    fn record_result(&mut self) {
+        if !self.run.done || self.run.recorded || self.run.attempts == 0 {
+            return;
+        }
+        self.data.records.push(Record {
+            profile: self.data.profiles[self.profile].clone(),
+            layout: self.layout,
+            lesson: self.lesson,
+            speed: self.run.speed(),
+            accuracy: self.run.accuracy(),
+            errors: self.run.errors,
+            seconds: self.run.seconds(),
+            endless: self.run.endless,
+        });
+        self.run.recorded = true;
+        self.save();
     }
     fn moving_text(&self, ui: &mut egui::Ui, dark: bool, compact: bool) {
         let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), if compact { 72. } else { 104. }),
+            egui::vec2(ui.available_width(), if compact { 52. } else { 64. }),
             egui::Sense::hover(),
         );
         let start = self.run.position.saturating_sub(100);
@@ -305,9 +383,19 @@ impl App {
         let gap = 8.;
         ui.spacing_mut().item_spacing = egui::vec2(gap, 6.);
         ui.spacing_mut().button_padding = egui::vec2(8., 6.);
-        let compact = ui.ctx().screen_rect().height() < 950.;
-        let key_width =
-            ((ui.available_width() - 12. * gap) / 13.).clamp(30., if compact { 43. } else { 62. });
+        let compact = ui.ctx().screen_rect().height() < 1100.;
+        let key_width = ((ui.available_width() - 12. * gap) / 13.).clamp(
+            30.,
+            if compact {
+                if ui.ctx().screen_rect().height() >= 900. {
+                    54.
+                } else {
+                    43.
+                }
+            } else {
+                62.
+            },
+        );
         let key_height = (key_width * 0.78).clamp(34., 48.);
         let space_width = key_width * 6. + 5. * gap;
         for s in &rows {
@@ -378,7 +466,7 @@ impl App {
 }
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        let compact = ctx.screen_rect().height() < 950.;
+        let compact = ctx.screen_rect().height() < 1100.;
         let dark = self.data.dark;
         let background = if dark {
             Color32::from_rgb(14, 16, 15)
@@ -456,15 +544,17 @@ impl eframe::App for App {
                         .color(Color32::LIGHT_GRAY),
                 );
                 ui.add_space(45.);
-                for (i, t) in ["Тренировка", "Уроки", "Статистика", "Настройки"]
-                    .iter()
-                    .enumerate()
-                {
-                    let selected = self.page == i;
+                for (i, t) in [
+                    (4, "Главная"),
+                    (1, "Уроки"),
+                    (2, "Статистика"),
+                    (3, "Настройки"),
+                ] {
+                    let selected = self.page == i || (i == 4 && self.page == 0);
                     if ui
                         .add_sized(
                             [152., 44.],
-                            egui::Button::new(RichText::new(*t).color(if selected {
+                            egui::Button::new(RichText::new(t).color(if selected {
                                 GREEN
                             } else {
                                 Color32::WHITE
@@ -493,24 +583,12 @@ impl eframe::App for App {
  ui.set_width(width);
  if compact {ui.spacing_mut().item_spacing.y=8.;}
  ui.add_space(if width>1000. {16.}else{0.});
- ui.horizontal(|ui|{ui.heading(RichText::new(match self.page{0=>"Тише мысли. Быстрее пальцы.",1=>"Маленькие шаги. Большой прогресс.",2=>"Ваш ритм в цифрах.",_=>"Место для вашей практики."}).size(27.));});ui.label(RichText::new("Ежедневная практика слепой печати").color(MUTED));ui.add_space(15.);
+ ui.horizontal(|ui|{ui.heading(RichText::new(match self.page{4=>"Найдите свой ритм.",0=>"Практика печати",1=>"Маленькие шаги. Большой прогресс.",2=>"Ваш ритм в цифрах.",_=>"Место для вашей практики."}).size(27.));});ui.label(RichText::new("Ежедневная практика слепой печати").color(MUTED));ui.add_space(15.);
  if !self.notice.is_empty(){ui.colored_label(Color32::DARK_RED,&self.notice);}
- if self.page==0 {
- let old=(self.profile,self.layout);ui.horizontal(|ui|{egui::ComboBox::from_id_salt("profile").selected_text(self.data.profiles.get(self.profile).map(String::as_str).unwrap_or("Мой профиль")).show_ui(ui,|ui|{for(i,p)in self.data.profiles.iter().enumerate(){ui.selectable_value(&mut self.profile,i,p);}});egui::ComboBox::from_id_salt("layout").selected_text(COURSES[self.layout]).show_ui(ui,|ui|{for (i,name) in COURSES.iter().enumerate(){ui.selectable_value(&mut self.layout,i,*name);}});if ui.button("Начать заново").clicked(){self.reset()}});if old!=(self.profile,self.layout){self.reset()}
- ui.add_space(8.);ui.columns(3,|cols|{for (col,(label,value))in cols.iter_mut().zip([("Скорость",format!("{:.0} зн/мин",self.run.speed())),("Точность",format!("{:.0}%",self.run.accuracy())),("Время",format!("{:02}:{:02}",self.run.seconds() as u64/60,self.run.seconds() as u64%60))]){let col_width=col.available_width();egui::Frame::new().fill(card).inner_margin(if compact{12.}else{18.}).corner_radius(12.).show(col,|ui|{ui.set_min_width((col_width-if compact{24.}else{36.}).max(0.));ui.label(RichText::new(label).color(MUTED));ui.label(RichText::new(value).size(30.).strong());});}});
- ui.add_space(if compact{4.}else{12.});let exercise_width=ui.available_width();egui::Frame::new().fill(card).inner_margin(if compact{18.}else{28.}).corner_radius(16.).show(ui,|ui|{ui.set_min_width(exercise_width-if compact{36.}else{56.});ui.label(RichText::new(format!("УРОК {} / 8   ·   {}",self.lesson+1,lessons::title(self.layout,self.lesson))).small().color(MUTED));ui.add_space(14.);
- self.moving_text(ui, dark, compact);ui.add_space(12.);ui.label(if self.run.done{"Готово! Результат сохранён."}else if self.run.paused{"Пауза. Нажмите «Продолжить»."}else{"Печатайте текст · ошибочный символ не продвигает курсор"});});
- ui.add_space(12.);
- let keyboard_width=ui.available_width();
- egui::Frame::new().fill(card).inner_margin(if compact{16.}else{24.}).corner_radius(16.).show(ui,|ui|{
- ui.set_min_width(keyboard_width-if compact{32.}else{48.});
- ui.horizontal(|ui|{ui.label(RichText::new("КЛАВИАТУРА").size(11.).color(MUTED));ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{ui.label(RichText::new("Подсветка показывает следующую клавишу").small().color(MUTED));});});
- ui.add_space(12.);self.keyboard(ui);
- });ui.add_space(16.);ui.add(egui::ProgressBar::new(self.run.position as f32/self.run.text.len().max(1) as f32).fill(GREEN).show_percentage());
- ui.horizontal(|ui|{ui.label(RichText::new(format!("{} / {} символов",self.run.position,self.run.text.len())).color(MUTED));ui.add_space(12.);if ui.button(if self.run.paused{"Продолжить"}else{"Пауза"}).clicked(){self.run.pause()} if self.run.done && ui.button("Следующий урок →").clicked(){self.lesson=(self.lesson+1).min(7);self.reset()}ui.label(format!("Ошибок: {}",self.run.errors));});
- if !ctx.wants_keyboard_input(){let events=ctx.input(|i|i.events.clone());for event in events {let text=match event {egui::Event::Text(t)=>t,egui::Event::Key{key:egui::Key::Enter,pressed:true,..}=>"\n".into(),egui::Event::Key{key:egui::Key::Tab,pressed:true,..}=>"    ".into(),_=>String::new()};for c in text.chars(){let was_done=self.run.done;self.run.input(c);if self.run.wrong && self.data.sound{let _=std::process::Command::new("canberra-gtk-play").args(["-i","dialog-error"]).spawn();}if !was_done && self.run.done {self.data.records.push(Record{profile:self.data.profiles[self.profile].clone(),layout:self.layout,lesson:self.lesson,speed:self.run.speed(),accuracy:self.run.accuracy(),errors:self.run.errors,seconds:self.run.seconds()});self.save();}}}}
- } else if self.page==1 {ui.horizontal(|ui|{for(i,name)in COURSES.iter().enumerate(){if ui.selectable_value(&mut self.layout,i,*name).clicked(){self.reset();}}});ui.add_space(10.);for(i,title)in (if self.layout<2 {lessons::TITLES}else{lessons::CODE_TITLES}).iter().enumerate(){egui::Frame::new().fill(card).inner_margin(18.).corner_radius(10.).show(ui,|ui|{ui.horizontal(|ui|{ui.label(RichText::new(format!("0{}   {}",i+1,title)).size(22.));if ui.button("Практиковаться →").clicked(){self.lesson=i;self.reset();self.page=0}});ui.label(lessons::hint(self.layout));ui.label(RichText::new("100 слов · курсор по центру").small().color(MUTED));});}ui.add_space(15.);ui.heading("Ваш текст");ui.add(egui::TextEdit::multiline(&mut self.custom).desired_rows(4).hint_text("Вставьте текст для тренировки"));if ui.add_enabled(!self.custom.trim().is_empty(),egui::Button::new("Тренироваться со своим текстом")).clicked(){let text=self.custom.replace("\r\n","\n").replace('\t',"    ");self.run=Run::new(&text);self.page=0;}
- }else if self.page==2 {let name=self.data.profiles.get(self.profile).cloned().unwrap_or_default();ui.label(format!("Профиль: {name}"));let records:Vec<_>=self.data.records.iter().filter(|r|r.profile==name).collect();if records.is_empty(){ui.add_space(40.);ui.heading("Первая тренировка — начало истории.");ui.label("Завершите урок, чтобы увидеть здесь свой прогресс.");}else{ui.label(format!("Завершено: {}    ·    Лучшая скорость: {:.0} зн/мин",records.len(),records.iter().map(|r|r.speed).fold(0.,f64::max)));let (rect,_)=ui.allocate_exact_size(egui::vec2(ui.available_width(),120.),egui::Sense::hover());let max=records.iter().map(|r|r.speed).fold(1.,f64::max);for(i,r)in records.iter().rev().take(30).rev().enumerate(){let w=rect.width()/30.;let h=(r.speed/max)as f32*100.;ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(rect.left()+i as f32*w,rect.bottom()-h),egui::vec2(w-4.,h)),3.,if dark{LIME}else{GREEN});}egui::Grid::new("history").striped(true).spacing([24.,12.]).show(ui,|ui|{for s in ["Урок","Раскладка","Зн/мин","Точность","Ошибки"]{ui.strong(s);}ui.end_row();for r in records.iter().rev().take(100){ui.label(lessons::title(r.layout.min(3),r.lesson.min(7)));ui.label(COURSES[r.layout.min(3)]);ui.label(format!("{:.0}",r.speed));ui.label(format!("{:.1}%",r.accuracy));ui.label(r.errors.to_string());ui.end_row();}});}
+ if self.page==0 {self.training(ui,ctx,card,dark,compact);
+ } else if self.page==1 {ui.horizontal(|ui|{for(i,name)in COURSES.iter().enumerate(){if ui.selectable_value(&mut self.layout,i,*name).clicked(){self.reset();}}});ui.add_space(10.);for(i,title)in (if self.layout<2 {lessons::TITLES}else{lessons::CODE_TITLES}).iter().enumerate(){egui::Frame::new().fill(card).inner_margin(18.).corner_radius(10.).show(ui,|ui|{ui.horizontal(|ui|{ui.label(RichText::new(format!("0{}   {}",i+1,title)).size(22.));if ui.button("Практиковаться →").clicked(){self.lesson=i;self.selected_endless=false;self.reset();self.page=0}});ui.label(lessons::hint(self.layout));ui.label(RichText::new("100 слов · курсор по центру").small().color(MUTED));});}ui.add_space(15.);ui.heading("Ваш текст");ui.add(egui::TextEdit::multiline(&mut self.custom).desired_rows(4).hint_text("Вставьте текст для тренировки"));if ui.add_enabled(!self.custom.trim().is_empty(),egui::Button::new("Тренироваться со своим текстом")).clicked(){let text=self.custom.replace("\r\n","\n").replace('\t',"    ");self.selected_endless=false;self.run=Run::new(&text);self.page=0;}
+ }else if self.page==2 {let name=self.data.profiles.get(self.profile).cloned().unwrap_or_default();ui.label(format!("Профиль: {name}"));let records:Vec<_>=self.data.records.iter().filter(|r|r.profile==name).collect();if records.is_empty(){ui.add_space(40.);ui.heading("Первая тренировка — начало истории.");ui.label("Завершите урок, чтобы увидеть здесь свой прогресс.");}else{ui.label(format!("Завершено: {}    ·    Лучшая скорость: {:.0} зн/мин",records.len(),records.iter().map(|r|r.speed).fold(0.,f64::max)));let (rect,_)=ui.allocate_exact_size(egui::vec2(ui.available_width(),120.),egui::Sense::hover());let max=records.iter().map(|r|r.speed).fold(1.,f64::max);for(i,r)in records.iter().rev().take(30).rev().enumerate(){let w=rect.width()/30.;let h=(r.speed/max)as f32*100.;ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(rect.left()+i as f32*w,rect.bottom()-h),egui::vec2(w-4.,h)),3.,if dark{LIME}else{GREEN});}egui::Grid::new("history").striped(true).spacing([24.,12.]).show(ui,|ui|{for s in ["Урок","Раскладка","Зн/мин","Точность","Ошибки"]{ui.strong(s);}ui.end_row();for r in records.iter().rev().take(100){ui.label(if r.endless {"Бесконечный режим"}else{lessons::title(r.layout.min(3),r.lesson.min(7))});ui.label(COURSES[r.layout.min(3)]);ui.label(format!("{:.0}",r.speed));ui.label(format!("{:.1}%",r.accuracy));ui.label(r.errors.to_string());ui.end_row();}});}
+ }else if self.page==4 {self.home(ui,card);
  }else {if ui.checkbox(&mut self.data.dark,"Тёмная тема").changed(){self.save()}ui.heading("Профили");ui.label("История каждого пользователя хранится отдельно на этом компьютере.");ui.horizontal(|ui|{ui.text_edit_singleline(&mut self.new_profile);if ui.button("Добавить профиль").clicked(){let name=self.new_profile.trim().to_string();if !name.is_empty()&&!self.data.profiles.contains(&name){self.data.profiles.push(name);self.profile=self.data.profiles.len()-1;self.new_profile.clear();self.reset();self.save();}}});for p in &self.data.profiles{ui.label(format!("• {p}"));}ui.add_space(20.);if ui.checkbox(&mut self.data.sound,"Звук ошибки (Linux: canberra-gtk-play)").changed(){self.save()}ui.add_space(20.);ui.heading("Как заниматься");ui.label("Сидите удобно, расслабьте кисти.\nНачните с домашнего ряда и занимайтесь по 10–15 минут.\nЦвет клавиши подсказывает палец, подсветка — следующую букву.\nРаскладку операционной системы переключайте самостоятельно.");ui.label(format!("Данные: {}",self.path.display()));}
  });});});});
     }
@@ -646,5 +724,64 @@ mod scrolling_tests {
                 }
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod endless_tests {
+    use super::*;
+    #[test]
+    fn endless_stream_continues_and_bounds_memory() {
+        for course in 0..4 {
+            let mut run = Run::infinite(course, 123);
+            for _ in 0..25000 {
+                let next = run.text[run.position];
+                run.input(next);
+                assert!(!run.done);
+                assert!(run.text.len() < 2500);
+            }
+            assert_eq!(run.typed(), 25000);
+            assert_eq!(run.accuracy(), 100.);
+            assert!(run.discarded > 0);
+            run.finish();
+            assert!(run.done);
+            assert!(run.start.is_none());
+            let count = run.attempts;
+            run.input('!');
+            assert_eq!(run.attempts, count);
+        }
+    }
+    #[test]
+    fn endless_pause_and_errors_preserve_stream() {
+        let mut run = Run::infinite(0, 1);
+        run.input('\0');
+        assert_eq!(run.errors, 1);
+        assert_eq!(run.position, 0);
+        run.pause();
+        let expected = run.text[0];
+        run.input(expected);
+        assert_eq!(run.position, 0);
+        run.pause();
+        run.input(expected);
+        assert_eq!(run.typed(), 1);
+    }
+    #[test]
+    fn new_blocks_vary_and_code_retains_whitespace() {
+        for course in 0..4 {
+            let mut state = 25;
+            let examples: std::collections::HashSet<_> = (0..20)
+                .map(|_| lessons::endless_block(course, &mut state))
+                .collect();
+            assert!(examples.len() > 3);
+            assert!(examples.iter().all(|s| !s.is_empty()));
+            if course >= 2 {
+                assert!(examples.iter().any(|s| s.contains('\n')));
+            }
+        }
+    }
+    #[test]
+    fn old_record_loads_as_regular_lesson() {
+        let record:Record=serde_json::from_str(r#"{"profile":"A","layout":0,"lesson":0,"speed":120.0,"accuracy":100.0,"errors":0,"seconds":20.0}"#).unwrap();
+        assert!(!record.endless);
     }
 }

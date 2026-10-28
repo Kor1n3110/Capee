@@ -71,3 +71,34 @@ pub fn exercise(course: usize, lesson: usize) -> String {
     }
     text
 }
+
+/// Small local PRNG for exercise variety; it is not used for security or credentials.
+pub fn next_random(state: &mut u64) -> u64 {
+    if *state == 0 {
+        *state = 0x9e3779b97f4a7c15;
+    }
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    *state
+}
+
+pub fn endless_block(course: usize, state: &mut u64) -> String {
+    let lesson = (next_random(state) % 8) as usize;
+    if course >= 2 {
+        let number = 10 + next_random(state) % 90;
+        let suffix = next_random(state) % 1000;
+        return TEXTS[course][lesson]
+            .replace("25", &number.to_string())
+            .replace("score", &format!("score_{suffix}"))
+            .replace("total", &format!("total_{suffix}"));
+    }
+    if lesson >= 5 {
+        return TEXTS[course][lesson].to_string();
+    }
+    let pool: Vec<_> = TEXTS[course][lesson].split_whitespace().collect();
+    (0..24)
+        .map(|_| pool[(next_random(state) as usize) % pool.len()])
+        .collect::<Vec<_>>()
+        .join(" ")
+}
