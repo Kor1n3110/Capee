@@ -9,7 +9,7 @@ const LIME: Color32 = Color32::from_rgb(213, 246, 133);
 const PAPER: Color32 = Color32::from_rgb(247, 246, 240);
 const MUTED: Color32 = Color32::from_rgb(128, 139, 130);
 mod lessons;
-use lessons::{COURSES, TEXTS};
+use lessons::COURSES;
 #[derive(Default, Serialize, Deserialize, Clone)]
 struct Record {
     profile: String,
@@ -166,7 +166,7 @@ impl App {
             profile: 0,
             layout: 0,
             lesson: 0,
-            run: Run::new(TEXTS[0][0]),
+            run: Run::new(&lessons::exercise(0, 0)),
             custom: String::new(),
             new_profile: String::new(),
             notice,
@@ -188,7 +188,88 @@ impl App {
         }
     }
     fn reset(&mut self) {
-        self.run = Run::new(TEXTS[self.layout][self.lesson]);
+        self.run = Run::new(&lessons::exercise(self.layout, self.lesson));
+    }
+    fn moving_text(&self, ui: &mut egui::Ui, dark: bool, compact: bool) {
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), if compact { 72. } else { 104. }),
+            egui::Sense::hover(),
+        );
+        let start = self.run.position.saturating_sub(100);
+        let end = (self.run.position + 101).min(self.run.text.len());
+        let mut job = egui::text::LayoutJob::default();
+        job.wrap.max_width = f32::INFINITY;
+        for i in start..end {
+            let c = self.run.text[i];
+            let glyph = if c == '\n' {
+                '↵'
+            } else if c == '\t' {
+                '→'
+            } else {
+                c
+            };
+            let current = i == self.run.position;
+            job.append(
+                &glyph.to_string(),
+                0.,
+                egui::TextFormat {
+                    font_id: egui::FontId::monospace(if compact { 25. } else { 30. }),
+                    color: if current {
+                        GREEN
+                    } else if i < self.run.position {
+                        if dark {
+                            LIME
+                        } else {
+                            Color32::from_rgb(63, 133, 83)
+                        }
+                    } else {
+                        if dark {
+                            Color32::from_gray(185)
+                        } else {
+                            MUTED
+                        }
+                    },
+                    background: if current {
+                        if self.run.wrong {
+                            Color32::from_rgb(255, 175, 175)
+                        } else {
+                            LIME
+                        }
+                    } else {
+                        Color32::TRANSPARENT
+                    },
+                    ..Default::default()
+                },
+            );
+        }
+        let galley = ui.fonts(|f| f.layout_job(job));
+        let cursor = galley.pos_from_ccursor(egui::text::CCursor::new(self.run.position - start));
+        let origin = egui::pos2(
+            rect.center().x - cursor.left(),
+            rect.center().y - galley.size().y / 2.,
+        );
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        painter.galley(origin, galley, MUTED);
+        // Fixed reference point: only the text's origin moves with typing.
+        let x = rect.center().x;
+        painter.line_segment(
+            [
+                egui::pos2(x, rect.center().y + 22.),
+                egui::pos2(x, rect.center().y + 28.),
+            ],
+            egui::Stroke::new(2.0_f32, if dark { LIME } else { GREEN }),
+        );
+        ui.label(
+            RichText::new(if self.run.done {
+                "Упражнение завершено"
+            } else if self.run.text.get(self.run.position) == Some(&'\n') {
+                "Следующая клавиша — Enter (↵)"
+            } else {
+                "Курсор в центре · вводите символ на подсветке · ↵ означает Enter"
+            })
+            .small()
+            .color(MUTED),
+        );
     }
     fn keyboard(&self, ui: &mut egui::Ui) {
         let rows = if self.layout == 0 {
@@ -418,7 +499,7 @@ impl eframe::App for App {
  let old=(self.profile,self.layout);ui.horizontal(|ui|{egui::ComboBox::from_id_salt("profile").selected_text(self.data.profiles.get(self.profile).map(String::as_str).unwrap_or("Мой профиль")).show_ui(ui,|ui|{for(i,p)in self.data.profiles.iter().enumerate(){ui.selectable_value(&mut self.profile,i,p);}});egui::ComboBox::from_id_salt("layout").selected_text(COURSES[self.layout]).show_ui(ui,|ui|{for (i,name) in COURSES.iter().enumerate(){ui.selectable_value(&mut self.layout,i,*name);}});if ui.button("Начать заново").clicked(){self.reset()}});if old!=(self.profile,self.layout){self.reset()}
  ui.add_space(8.);ui.columns(3,|cols|{for (col,(label,value))in cols.iter_mut().zip([("Скорость",format!("{:.0} зн/мин",self.run.speed())),("Точность",format!("{:.0}%",self.run.accuracy())),("Время",format!("{:02}:{:02}",self.run.seconds() as u64/60,self.run.seconds() as u64%60))]){let col_width=col.available_width();egui::Frame::new().fill(card).inner_margin(if compact{12.}else{18.}).corner_radius(12.).show(col,|ui|{ui.set_min_width((col_width-if compact{24.}else{36.}).max(0.));ui.label(RichText::new(label).color(MUTED));ui.label(RichText::new(value).size(30.).strong());});}});
  ui.add_space(if compact{4.}else{12.});let exercise_width=ui.available_width();egui::Frame::new().fill(card).inner_margin(if compact{18.}else{28.}).corner_radius(16.).show(ui,|ui|{ui.set_min_width(exercise_width-if compact{36.}else{56.});ui.label(RichText::new(format!("УРОК {} / 8   ·   {}",self.lesson+1,lessons::title(self.layout,self.lesson))).small().color(MUTED));ui.add_space(14.);
- let mut job=egui::text::LayoutJob::default();for(i,c)in self.run.text.iter().enumerate(){job.append(&if *c=='\n'{"↵\n".into()}else{c.to_string()},0.,egui::TextFormat{font_id:egui::FontId::monospace(23.),color:if i==self.run.position{GREEN}else if i<self.run.position{if dark {LIME}else{Color32::from_rgb(63,133,83)}}else{MUTED},background:if i==self.run.position {if self.run.wrong{Color32::from_rgb(255,195,195)}else{LIME}}else{Color32::TRANSPARENT},..Default::default()});}ui.allocate_ui_with_layout(egui::vec2(ui.available_width(),if compact{60.}else{100.}),egui::Layout::top_down(egui::Align::Min),|ui|{ui.add(egui::Label::new(job).wrap());});ui.add_space(12.);ui.label(if self.run.done{"Готово! Результат сохранён."}else if self.run.paused{"Пауза. Нажмите «Продолжить»."}else{"Печатайте текст · ошибочный символ не продвигает курсор"});});
+ self.moving_text(ui, dark, compact);ui.add_space(12.);ui.label(if self.run.done{"Готово! Результат сохранён."}else if self.run.paused{"Пауза. Нажмите «Продолжить»."}else{"Печатайте текст · ошибочный символ не продвигает курсор"});});
  ui.add_space(12.);
  let keyboard_width=ui.available_width();
  egui::Frame::new().fill(card).inner_margin(if compact{16.}else{24.}).corner_radius(16.).show(ui,|ui|{
@@ -428,7 +509,7 @@ impl eframe::App for App {
  });ui.add_space(16.);ui.add(egui::ProgressBar::new(self.run.position as f32/self.run.text.len().max(1) as f32).fill(GREEN).show_percentage());
  ui.horizontal(|ui|{ui.label(RichText::new(format!("{} / {} символов",self.run.position,self.run.text.len())).color(MUTED));ui.add_space(12.);if ui.button(if self.run.paused{"Продолжить"}else{"Пауза"}).clicked(){self.run.pause()} if self.run.done && ui.button("Следующий урок →").clicked(){self.lesson=(self.lesson+1).min(7);self.reset()}ui.label(format!("Ошибок: {}",self.run.errors));});
  if !ctx.wants_keyboard_input(){let events=ctx.input(|i|i.events.clone());for event in events {let text=match event {egui::Event::Text(t)=>t,egui::Event::Key{key:egui::Key::Enter,pressed:true,..}=>"\n".into(),egui::Event::Key{key:egui::Key::Tab,pressed:true,..}=>"    ".into(),_=>String::new()};for c in text.chars(){let was_done=self.run.done;self.run.input(c);if self.run.wrong && self.data.sound{let _=std::process::Command::new("canberra-gtk-play").args(["-i","dialog-error"]).spawn();}if !was_done && self.run.done {self.data.records.push(Record{profile:self.data.profiles[self.profile].clone(),layout:self.layout,lesson:self.lesson,speed:self.run.speed(),accuracy:self.run.accuracy(),errors:self.run.errors,seconds:self.run.seconds()});self.save();}}}}
- } else if self.page==1 {ui.horizontal(|ui|{for(i,name)in COURSES.iter().enumerate(){if ui.selectable_value(&mut self.layout,i,*name).clicked(){self.reset();}}});ui.add_space(10.);for(i,title)in (if self.layout<2 {lessons::TITLES}else{lessons::CODE_TITLES}).iter().enumerate(){egui::Frame::new().fill(card).inner_margin(18.).corner_radius(10.).show(ui,|ui|{ui.horizontal(|ui|{ui.label(RichText::new(format!("0{}   {}",i+1,title)).size(22.));if ui.button("Практиковаться →").clicked(){self.lesson=i;self.reset();self.page=0}});ui.label(lessons::hint(self.layout));});}ui.add_space(15.);ui.heading("Ваш текст");ui.add(egui::TextEdit::multiline(&mut self.custom).desired_rows(4).hint_text("Вставьте текст для тренировки"));if ui.add_enabled(!self.custom.trim().is_empty(),egui::Button::new("Тренироваться со своим текстом")).clicked(){let text=self.custom.replace("\r\n","\n").replace('\t',"    ");self.run=Run::new(&text);self.page=0;}
+ } else if self.page==1 {ui.horizontal(|ui|{for(i,name)in COURSES.iter().enumerate(){if ui.selectable_value(&mut self.layout,i,*name).clicked(){self.reset();}}});ui.add_space(10.);for(i,title)in (if self.layout<2 {lessons::TITLES}else{lessons::CODE_TITLES}).iter().enumerate(){egui::Frame::new().fill(card).inner_margin(18.).corner_radius(10.).show(ui,|ui|{ui.horizontal(|ui|{ui.label(RichText::new(format!("0{}   {}",i+1,title)).size(22.));if ui.button("Практиковаться →").clicked(){self.lesson=i;self.reset();self.page=0}});ui.label(lessons::hint(self.layout));ui.label(RichText::new("100 слов · курсор по центру").small().color(MUTED));});}ui.add_space(15.);ui.heading("Ваш текст");ui.add(egui::TextEdit::multiline(&mut self.custom).desired_rows(4).hint_text("Вставьте текст для тренировки"));if ui.add_enabled(!self.custom.trim().is_empty(),egui::Button::new("Тренироваться со своим текстом")).clicked(){let text=self.custom.replace("\r\n","\n").replace('\t',"    ");self.run=Run::new(&text);self.page=0;}
  }else if self.page==2 {let name=self.data.profiles.get(self.profile).cloned().unwrap_or_default();ui.label(format!("Профиль: {name}"));let records:Vec<_>=self.data.records.iter().filter(|r|r.profile==name).collect();if records.is_empty(){ui.add_space(40.);ui.heading("Первая тренировка — начало истории.");ui.label("Завершите урок, чтобы увидеть здесь свой прогресс.");}else{ui.label(format!("Завершено: {}    ·    Лучшая скорость: {:.0} зн/мин",records.len(),records.iter().map(|r|r.speed).fold(0.,f64::max)));let (rect,_)=ui.allocate_exact_size(egui::vec2(ui.available_width(),120.),egui::Sense::hover());let max=records.iter().map(|r|r.speed).fold(1.,f64::max);for(i,r)in records.iter().rev().take(30).rev().enumerate(){let w=rect.width()/30.;let h=(r.speed/max)as f32*100.;ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(rect.left()+i as f32*w,rect.bottom()-h),egui::vec2(w-4.,h)),3.,if dark{LIME}else{GREEN});}egui::Grid::new("history").striped(true).spacing([24.,12.]).show(ui,|ui|{for s in ["Урок","Раскладка","Зн/мин","Точность","Ошибки"]{ui.strong(s);}ui.end_row();for r in records.iter().rev().take(100){ui.label(lessons::title(r.layout.min(3),r.lesson.min(7)));ui.label(COURSES[r.layout.min(3)]);ui.label(format!("{:.0}",r.speed));ui.label(format!("{:.1}%",r.accuracy));ui.label(r.errors.to_string());ui.end_row();}});}
  }else {if ui.checkbox(&mut self.data.dark,"Тёмная тема").changed(){self.save()}ui.heading("Профили");ui.label("История каждого пользователя хранится отдельно на этом компьютере.");ui.horizontal(|ui|{ui.text_edit_singleline(&mut self.new_profile);if ui.button("Добавить профиль").clicked(){let name=self.new_profile.trim().to_string();if !name.is_empty()&&!self.data.profiles.contains(&name){self.data.profiles.push(name);self.profile=self.data.profiles.len()-1;self.new_profile.clear();self.reset();self.save();}}});for p in &self.data.profiles{ui.label(format!("• {p}"));}ui.add_space(20.);if ui.checkbox(&mut self.data.sound,"Звук ошибки (Linux: canberra-gtk-play)").changed(){self.save()}ui.add_space(20.);ui.heading("Как заниматься");ui.label("Сидите удобно, расслабьте кисти.\nНачните с домашнего ряда и занимайтесь по 10–15 минут.\nЦвет клавиши подсказывает палец, подсветка — следующую букву.\nРаскладку операционной системы переключайте самостоятельно.");ui.label(format!("Данные: {}",self.path.display()));}
  });});});});
@@ -496,9 +577,11 @@ mod curriculum_tests {
     use super::*;
     #[test]
     fn all_lessons_are_completable() {
-        for course in TEXTS {
-            for text in course {
-                let mut run = Run::new(text);
+        for course in 0..4 {
+            for lesson in 0..8 {
+                let text = lessons::exercise(course, lesson);
+                assert_eq!(text.split_whitespace().count(), 100);
+                let mut run = Run::new(&text);
                 for c in text.chars() {
                     run.input(c)
                 }
@@ -535,5 +618,33 @@ mod preference_tests {
         };
         let loaded: Data = serde_json::from_slice(&serde_json::to_vec(&data).unwrap()).unwrap();
         assert!(loaded.dark);
+    }
+}
+
+#[cfg(test)]
+mod scrolling_tests {
+    use super::*;
+    #[test]
+    fn code_keeps_line_breaks_and_indentation() {
+        let text = lessons::exercise(2, 3);
+        assert!(text.contains("\n    print"));
+        assert_eq!(text.split_whitespace().count(), 100);
+    }
+    #[test]
+    fn scroll_cursor_uses_character_positions() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let text = "ёж ↵ rust";
+                let galley = ui.fonts(|f| {
+                    f.layout_no_wrap(text.into(), egui::FontId::monospace(25.), Color32::WHITE)
+                });
+                for index in 0..=text.chars().count() {
+                    let cursor = galley.pos_from_ccursor(egui::text::CCursor::new(index));
+                    let origin = 400. - cursor.left();
+                    assert!((origin + cursor.left() - 400.).abs() < 0.01);
+                }
+            });
+        });
     }
 }

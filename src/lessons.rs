@@ -45,3 +45,29 @@ pub const TEXTS: [[&str;8];4] = [
 ["() [] {} : , . _ = + - * / # ' \"", "name = \"Ada\"\nage = 25\nis_ready = True", "total = 12 + 8\naverage = total / 4\nmessage = f\"Result: {average}\"", "score = 95\nif score >= 90:\n    print(\"Great work!\")\nelse:\n    print(\"Keep practicing\")", "for number in range(5):\n    print(number)\n\ncount = 0\nwhile count < 3:\n    count += 1", "def greet(name: str) -> str:\n    return f\"Hello, {name}!\"\n\nprint(greet(\"Ada\"))", "scores = [85, 92, 98]\npassed = [s for s in scores if s >= 90]\nuser = {\"name\": \"Ada\", \"scores\": passed}", "def average(values):\n    if not values:\n        return 0\n    return sum(values) / len(values)\n\nif __name__ == \"__main__\":\n    scores = [80, 90, 100]\n    print(f\"Average: {average(scores):.1f}\")"],
 ["() [] {} ; : , . _ = + - * / < > & # \"", "int age = 25;\ndouble speed = 120.5;\nbool ready = true;", "int total = 12 + 8;\ndouble average = total / 4.0;\nint remainder = total % 3;", "int score = 95;\nif (score >= 90) {\n    std::cout << \"Great work!\";\n} else {\n    std::cout << \"Keep practicing\";\n}", "for (int i = 0; i < 5; ++i) {\n    std::cout << i << '\\n';\n}", "int add(int a, int b) {\n    return a + b;\n}\n\nint result = add(3, 7);", "std::vector<int> scores = {85, 92, 98};\nfor (const auto& score : scores) {\n    std::cout << score << '\\n';\n}", "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> scores = {80, 90, 100};\n    int total = 0;\n    for (int score : scores) {\n        total += score;\n    }\n    std::cout << total / scores.size() << '\\n';\n    return 0;\n}"]
 ];
+
+/// Extend a skill block to exactly 100 whitespace-delimited words, retaining code indentation.
+pub fn exercise(course: usize, lesson: usize) -> String {
+    let seed = TEXTS[course][lesson];
+    let separator = if course < 2 { " " } else { "\n\n" };
+    let mut text = seed.to_owned();
+    while text.split_whitespace().count() < 100 {
+        text.push_str(separator);
+        text.push_str(seed);
+    }
+    let mut words = 0;
+    let mut in_word = false;
+    for (index, c) in text.char_indices() {
+        if c.is_whitespace() {
+            if in_word && words == 100 {
+                text.truncate(index);
+                return text;
+            }
+            in_word = false;
+        } else if !in_word {
+            words += 1;
+            in_word = true;
+        }
+    }
+    text
+}
